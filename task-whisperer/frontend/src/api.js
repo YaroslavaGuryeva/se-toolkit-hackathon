@@ -3,7 +3,9 @@
  */
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+// Use relative URLs so requests go through the nginx proxy on the same origin.
+// The nginx config proxies /api/* to the backend automatically.
+const API_URL = process.env.REACT_APP_API_URL || '/api';
 
 const api = axios.create({
   baseURL: API_URL,
