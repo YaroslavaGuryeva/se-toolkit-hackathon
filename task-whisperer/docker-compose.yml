@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  db:
+    image: postgres:15-alpine
+    container_name: task-whisperer-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: task_whisperer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - task-whisperer-network
+
+  # FastAPI backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: task-whisperer-backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/task_whisperer
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-your-api-key-here}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen-plus}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - task-whisperer-network
+
+  # React frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: task-whisperer-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - task-whisperer-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  task-whisperer-network:
+    driver: bridge
