@@ -1,6 +1,6 @@
 """
 One-time migration script to update the database schema.
-Adds the category_override column and fixes the FK constraint on task_history.
+Adds the category_override column, overdue column, and fixes the FK constraint on task_history.
 Run with: python migrate.py
 """
 import os
@@ -32,7 +32,18 @@ def run_migrations():
         else:
             print("  • category_override column already exists")
 
-        # 2. Fix FK constraint on task_history to include ON DELETE CASCADE
+        # 2. Add overdue column if it doesn't exist
+        if "overdue" not in columns:
+            print("Adding overdue column to tasks table...")
+            conn.execute(text(
+                "ALTER TABLE tasks ADD COLUMN overdue BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            conn.commit()
+            print("  ✓ Added overdue column")
+        else:
+            print("  • overdue column already exists")
+
+        # 3. Fix FK constraint on task_history to include ON DELETE CASCADE
         # PostgreSQL doesn't allow ALTERing FK constraints, so we need to drop and recreate
         print("Checking FK constraint on task_history.task_id...")
         constraints = inspector.get_foreign_keys("task_history")

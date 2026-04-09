@@ -11,6 +11,7 @@ from services.user_profile_service import (
     compute_user_profile,
     update_profile_manually,
 )
+from services.overdue_service import detect_and_mark_overdue_tasks
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -48,7 +49,11 @@ def update_profile(
 def recompute_profile(db: Session = Depends(get_db)):
     """
     Force a full recomputation of the user profile from task history.
+    This also runs overdue detection first to ensure accurate procrastination scores.
     Useful after bulk task completions or data imports.
     """
+    # Run overdue detection first to ensure accurate metrics
+    detect_and_mark_overdue_tasks(db)
+    
     profile = compute_user_profile(db)
     return profile

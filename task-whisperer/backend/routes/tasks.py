@@ -10,7 +10,8 @@ from sqlalchemy.exc import IntegrityError
 
 from db import get_db
 from models import Task, TaskHistory
-from schemas import TaskCreate, TaskUpdate, TaskResponse, TaskCompleteRequest, TaskHistoryResponse
+from schemas import TaskCreate, TaskUpdate, TaskResponse, TaskCompleteRequest, TaskHistoryResponse, OverdueDetectionResponse
+from services.overdue_service import detect_and_mark_overdue_tasks, get_overdue_tasks_count
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,9 @@ def complete_task(task_id: int, request: TaskCompleteRequest, db: Session = Depe
     task.completed = True
     db.commit()
 
+    # Run overdue detection before recomputing profile to ensure accurate metrics
+    detect_and_mark_overdue_tasks(db)
+
     # Check if this task was previously recommended
     # (We track this in the recommendation endpoint; default to False)
     was_recommended = False
@@ -129,7 +133,7 @@ def complete_task(task_id: int, request: TaskCompleteRequest, db: Session = Depe
     db.commit()
     db.refresh(history)
 
-    # Recompute user profile after task completion
+    # Recompute user profile after task completion (includes overdue penalty)
     from services.user_profile_service import compute_user_profile
     compute_user_profile(db)
 
@@ -161,3 +165,32 @@ def update_task_category(task_id: int, category_data: CategoryUpdate, db: Sessio
     db.commit()
     db.refresh(task)
     return task
+
+
+@router.post("/overdue/detect", response_model=OverdueDetectionResponse)
+def detect_overdue_tasks(db: Session = Depends(get_db)):
+    """
+    Trigger overdue task detection.
+    Scans all tasks and marks any with past deadlines (that are not completed) as overdue.
+    Returns the count of newly marked overdue tasks and total overdue count.
+    """
+    newly_marked = detect_and_mark_overdue_tasks(db)
+    total_overdue = get_overdue_tasks_count(db)
+    
+    return OverdueDetectionResponse(
+        newly_marked=newly_marked,
+        total_overdue=total_overdue
+    )
+
+
+@router.get("/overdue/count", response_model=OverdueDetectionResponse)
+def get_overdue_count(db: Session = Depends(get_db)):
+    """
+    Get the current count of overdue tasks.
+    """
+    total_overdue = get_overdue_tasks_count(db)
+    
+    return OverdueDetectionResponse(
+        newly_marked=0,
+        total_overdue=total_overdue
+    )

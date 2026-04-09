@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { completeTask, deleteTask, updateTaskCategory } from '../api';
+import TaskDetailModal from './TaskDetailModal';
 
 /**
  * TaskItem component for displaying and managing a single task.
@@ -10,6 +11,7 @@ function TaskItem({ task }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showCategoryEditor, setShowCategoryEditor] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   // Determine Eisenhower quadrant (respects category_override)
   const getQuadrant = () => {
@@ -40,6 +42,23 @@ function TaskItem({ task }) {
     if (diffDays < 7) return `${diffDays}d remaining`;
     return date.toLocaleDateString();
   };
+
+  // Get deadline status class
+  const getDeadlineStatus = () => {
+    if (task.completed) return 'completed';
+    if (task.overdue) return 'overdue';
+    if (!task.deadline) return 'no-deadline';
+    const date = new Date(task.deadline);
+    const now = new Date();
+    const diffMs = date - now;
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    
+    if (diffMs < 0) return 'overdue';
+    if (diffHours < 24) return 'urgent';
+    return 'normal';
+  };
+
+  const deadlineStatus = getDeadlineStatus();
 
   const handleDelete = async () => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
@@ -83,80 +102,110 @@ function TaskItem({ task }) {
 
   if (task.completed) {
     return (
-      <div className="card" style={{ opacity: 0.7 }}>
+      <>
+        <div className="card" style={{ opacity: 0.7 }}>
+          {error && <div className="error">{error}</div>}
+          {success && <div className="success">{success}</div>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              <h4
+                style={{ textDecoration: 'line-through', color: '#64748B', marginBottom: '0.5rem', cursor: 'pointer' }}
+                onClick={(e) => { e.stopPropagation(); setShowDetails(true); }}
+                title="Click to view details"
+              >
+                {task.title}
+              </h4>
+              {task.description && (
+                <p
+                  style={{ color: '#94A3B8', fontSize: '0.85rem', marginBottom: '0.5rem', textDecoration: 'line-through', cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); setShowDetails(true); }}
+                  title="Click to view details"
+                >
+                  {task.description}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                <span className="badge badge-completed">✅ Completed</span>
+                {task.overdue && (
+                  <span className="badge badge-overdue">⏰ Was Overdue</span>
+                )}
+                <span className={`badge ${task.is_urgent ? 'badge-urgent' : 'badge-normal'}`}>
+                  {task.is_urgent ? '🔥 Urgent' : 'Normal'}
+                </span>
+                <span className="badge badge-important">
+                  ⭐ Importance: {task.importance}/10
+                </span>
+                <span className="badge badge-normal">
+                  📐 {quadrant.key}: {quadrant.label}
+                </span>
+                {task.effort && (
+                  <span className="badge badge-normal">
+                    ⏱️ ~{task.effort} min
+                  </span>
+                )}
+                <span className="badge badge-normal">
+                  📅 {formatDeadline(task.deadline)}
+                </span>
+              </div>
+            </div>
+            <button className="btn btn-danger btn-small" onClick={handleDelete} style={{ marginLeft: '0.5rem' }}>
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+        {showDetails && <TaskDetailModal task={task} onClose={() => setShowDetails(false)} />}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className={`card ${quadrant.class}`}>
         {error && <div className="error">{error}</div>}
         {success && <div className="success">{success}</div>}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div style={{ flex: 1 }}>
-            <h4 style={{ textDecoration: 'line-through', color: '#64748B', marginBottom: '0.5rem' }}>{task.title}</h4>
+            <h4
+              style={{ marginBottom: '0.5rem', cursor: 'pointer' }}
+              onClick={(e) => { e.stopPropagation(); setShowDetails(true); }}
+              title="Click to view details"
+            >
+              {task.title}
+            </h4>
             {task.description && (
-              <p style={{ color: '#94A3B8', fontSize: '0.85rem', marginBottom: '0.5rem', textDecoration: 'line-through' }}>
+              <p
+                style={{ color: '#64748B', fontSize: '0.9rem', marginBottom: '0.75rem', cursor: 'pointer' }}
+                onClick={(e) => { e.stopPropagation(); setShowDetails(true); }}
+                title="Click to view details"
+              >
                 {task.description}
               </p>
             )}
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-              <span className="badge badge-completed">✅ Completed</span>
+              {task.overdue && (
+                <span className="badge badge-overdue">⏰ Overdue</span>
+              )}
               <span className={`badge ${task.is_urgent ? 'badge-urgent' : 'badge-normal'}`}>
                 {task.is_urgent ? '🔥 Urgent' : 'Normal'}
               </span>
               <span className="badge badge-important">
                 ⭐ Importance: {task.importance}/10
               </span>
-              <span className="badge badge-normal">
-                📐 {quadrant.key}: {quadrant.label}
+              <span className="badge badge-normal" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setShowCategoryEditor(!showCategoryEditor); }} title="Click to change category">
+                📐 {quadrant.key}: {quadrant.label} {task.category_override ? '(custom)' : '(auto)'} ✏️
               </span>
               {task.effort && (
                 <span className="badge badge-normal">
                   ⏱️ ~{task.effort} min
                 </span>
               )}
-              <span className="badge badge-normal">
+              <span className={`badge badge-deadline-${deadlineStatus}`}>
                 📅 {formatDeadline(task.deadline)}
               </span>
             </div>
           </div>
-          <button className="btn btn-danger btn-small" onClick={handleDelete} style={{ marginLeft: '0.5rem' }}>
-            🗑️ Delete
-          </button>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`card ${quadrant.class}`}>
-      {error && <div className="error">{error}</div>}
-      {success && <div className="success">{success}</div>}
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
-          <h4 style={{ marginBottom: '0.5rem' }}>{task.title}</h4>
-          {task.description && (
-            <p style={{ color: '#64748B', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-              {task.description}
-            </p>
-          )}
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-            <span className={`badge ${task.is_urgent ? 'badge-urgent' : 'badge-normal'}`}>
-              {task.is_urgent ? '🔥 Urgent' : 'Normal'}
-            </span>
-            <span className="badge badge-important">
-              ⭐ Importance: {task.importance}/10
-            </span>
-            <span className="badge badge-normal" style={{ cursor: 'pointer' }} onClick={() => setShowCategoryEditor(!showCategoryEditor)} title="Click to change category">
-              📐 {quadrant.key}: {quadrant.label} {task.category_override ? '(custom)' : '(auto)'} ✏️
-            </span>
-            {task.effort && (
-              <span className="badge badge-normal">
-                ⏱️ ~{task.effort} min
-              </span>
-            )}
-            <span className="badge badge-normal">
-              📅 {formatDeadline(task.deadline)}
-            </span>
-          </div>
-        </div>
-      </div>
 
       {/* Category editor */}
       {showCategoryEditor && (
@@ -232,6 +281,8 @@ function TaskItem({ task }) {
         </div>
       )}
     </div>
+    {showDetails && <TaskDetailModal task={task} onClose={() => setShowDetails(false)} />}
+  </>
   );
 }
 

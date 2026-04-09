@@ -61,6 +61,7 @@ class TaskResponse(BaseModel):
     importance: int
     is_urgent: bool
     completed: bool
+    overdue: bool
     category_override: Optional[str]
     created_at: datetime
     updated_at: datetime
@@ -135,3 +136,11 @@ class UserProfileUpdate(BaseModel):
     avg_completion_time: Optional[float] = Field(None, gt=0)
     procrastination_score: Optional[float] = Field(None, ge=0, le=1)
     urgency_bias: Optional[float] = Field(None, ge=0, le=1)
+
+
+# ─── Overdue Detection Schemas ──────────────────────────────────
+
+class OverdueDetectionResponse(BaseModel):
+    """Schema returned by overdue task detection endpoint."""
+    newly_marked: int = Field(..., description="Number of tasks newly marked as overdue")
+    total_overdue: int = Field(..., description="Total number of overdue tasks")

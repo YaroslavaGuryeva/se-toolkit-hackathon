@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getTasks } from '../api';
+import { getTasks, getOverdueCount } from '../api';
 import TaskForm from './TaskForm';
 import TaskItem from './TaskItem';
 
@@ -12,7 +12,9 @@ function Dashboard() {
   const [error, setError] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [filter, setFilter] = useState('active'); // 'all', 'active', 'completed'
-  const [sortBy, setSortBy] = useState('created'); // 'created', 'importance', 'deadline'
+  const [sortBy, setSortBy] = useState('created'); // 'created', 'importance', 'deadline', 'effort', 'quadrant'
+  const [sortAsc, setSortAsc] = useState(false); // true = ascending, false = descending
+  const [overdueCount, setOverdueCount] = useState(0);
 
   const fetchTasks = async () => {
     setLoading(true);
@@ -20,6 +22,14 @@ function Dashboard() {
       const data = await getTasks();
       setTasks(data);
       setError('');
+      
+      // Fetch overdue count
+      try {
+        const overdueData = await getOverdueCount();
+        setOverdueCount(overdueData.total_overdue);
+      } catch (err) {
+        console.error('Failed to fetch overdue count:', err);
+      }
     } catch (err) {
       setError('Failed to load tasks. Is the backend running?');
     } finally {
@@ -35,8 +45,21 @@ function Dashboard() {
   const filteredTasks = tasks.filter((task) => {
     if (filter === 'active') return !task.completed;
     if (filter === 'completed') return task.completed;
+    if (filter === 'overdue') return task.overdue && !task.completed;
     return true;
   });
+
+  // Determine Eisenhower quadrant for a task
+  const getQuadrantOrder = (task) => {
+    if (task.category_override) {
+      const order = { 'Q1-Do First': 0, 'Q2-Schedule': 1, 'Q3-Delegate': 2, 'Q4-Eliminate': 3 };
+      return order[task.category_override] ?? 4;
+    }
+    if (task.is_urgent && task.importance >= 7) return 0;  // Q1
+    if (!task.is_urgent && task.importance >= 7) return 1; // Q2
+    if (task.is_urgent && task.importance < 7) return 2;   // Q3
+    return 3; // Q4
+  };
 
   // Sort tasks
   const sortedTasks = [...filteredTasks].sort((a, b) => {
@@ -46,8 +69,23 @@ function Dashboard() {
       if (!b.deadline) return -1;
       return new Date(a.deadline) - new Date(b.deadline);
     }
-    // Default: created_at descending
-    return new Date(b.created_at) - new Date(a.created_at);
+    if (sortBy === 'effort') {
+      if (!a.effort && !b.effort) return 0;
+      if (!a.effort) return 1;
+      if (!b.effort) return -1;
+      return sortAsc ? a.effort - b.effort : b.effort - a.effort;
+    }
+    if (sortBy === 'quadrant') {
+      const qA = getQuadrantOrder(a);
+      const qB = getQuadrantOrder(b);
+      if (qA !== qB) return qA - qB;
+      // Within same quadrant, sort by importance descending
+      return b.importance - a.importance;
+    }
+    // Default: created_at
+    return sortAsc
+      ? new Date(a.created_at) - new Date(b.created_at)
+      : new Date(b.created_at) - new Date(a.created_at);
   });
 
   const activeCount = tasks.filter((t) => !t.completed).length;
@@ -65,6 +103,12 @@ function Dashboard() {
           <div style={{ fontSize: '2rem', fontWeight: 700, color: '#10B981' }}>{completedCount}</div>
           <div style={{ color: '#64748B', fontSize: '0.9rem' }}>Completed</div>
         </div>
+        {overdueCount > 0 && (
+          <div className="card" style={{ flex: 1, minWidth: '150px', marginBottom: 0, textAlign: 'center', border: '2px solid #EF4444' }}>
+            <div style={{ fontSize: '2rem', fontWeight: 700, color: '#DC2626' }}>{overdueCount}</div>
+            <div style={{ color: '#DC2626', fontSize: '0.9rem', fontWeight: 600 }}>Overdue ⚠️</div>
+          </div>
+        )}
         <div className="card" style={{ flex: 1, minWidth: '150px', marginBottom: 0, textAlign: 'center' }}>
           <div style={{ fontSize: '2rem', fontWeight: 700, color: '#7C3AED' }}>{tasks.length}</div>
           <div style={{ color: '#64748B', fontSize: '0.9rem' }}>Total</div>
@@ -100,6 +144,7 @@ function Dashboard() {
             style={{ padding: '0.4rem 0.8rem', borderRadius: '6px', border: '1px solid #d1d5db' }}
           >
             <option value="active">Active Only</option>
+            <option value="overdue">Overdue Only</option>
             <option value="completed">Completed Only</option>
             <option value="all">All Tasks</option>
           </select>
@@ -108,13 +153,41 @@ function Dashboard() {
           <label style={{ marginRight: '0.5rem', color: '#64748B' }}>Sort by:</label>
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
+            onChange={(e) => {
+              const newSort = e.target.value;
+              setSortBy(newSort);
+              // Set sensible default direction when switching sort type
+              if (newSort === 'effort') setSortAsc(true);
+              if (newSort === 'created') setSortAsc(false); // latest first by default
+            }}
             style={{ padding: '0.4rem 0.8rem', borderRadius: '6px', border: '1px solid #d1d5db' }}
           >
             <option value="created">Date Created</option>
             <option value="importance">Importance</option>
             <option value="deadline">Deadline</option>
+            <option value="effort">Effort</option>
+            <option value="quadrant">Eisenhower Quadrant</option>
           </select>
+          {(sortBy === 'effort' || sortBy === 'created') && (
+            <button
+              onClick={() => setSortAsc(!sortAsc)}
+              style={{
+                marginLeft: '0.25rem',
+                padding: '0.4rem 0.6rem',
+                borderRadius: '6px',
+                border: '1px solid #d1d5db',
+                background: '#f8fafc',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+              }}
+              title={sortAsc ? 'Currently: ascending. Click to reverse.' : 'Currently: descending. Click to reverse.'}
+            >
+              {sortBy === 'effort'
+                ? sortAsc ? '↑ Min→Max' : '↓ Max→Min'
+                : sortAsc ? '↑ Earliest→Latest' : '↓ Latest→Earliest'}
+            </button>
+          )}
         </div>
       </div>
 

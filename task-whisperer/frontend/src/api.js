@@ -49,6 +49,16 @@ export const updateTaskCategory = async (taskId, categoryOverride) => {
   return response.data;
 };
 
+export const detectOverdueTasks = async () => {
+  const response = await api.post('/tasks/overdue/detect');
+  return response.data;
+};
+
+export const getOverdueCount = async () => {
+  const response = await api.get('/tasks/overdue/count');
+  return response.data;
+};
+
 // ─── Recommendation APIs ────────────────────────────────────────
 
 export const getRecommendation = async () => {

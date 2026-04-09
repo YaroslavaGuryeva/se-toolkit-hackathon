@@ -3,10 +3,12 @@ User profile service for computing and updating user behavior analytics.
 """
 import logging
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 
-from models import UserProfile, TaskHistory
+from models import UserProfile, TaskHistory, Task
+from services.overdue_service import get_overdue_tasks_count
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,6 @@ def compute_user_profile(db: Session) -> UserProfile:
 
     # Compute urgency_bias
     # Ratio of completed tasks that were marked as urgent
-    from models import Task
     urgent_completed = 0
     for h in history_records:
         original_task = db.query(Task).filter(Task.id == h.task_id).first()
@@ -85,15 +86,35 @@ def compute_user_profile(db: Session) -> UserProfile:
 
     # Compute procrastination_score
     # Higher score = more procrastination
-    # Based on average completion time relative to a "normal" baseline (60 min)
-    # If avg time is much higher than expected, user may be procrastinating
+    # Based on two factors:
+    # 1. Average completion time relative to a "normal" baseline (45 min)
+    # 2. Number of overdue, not-completed tasks (penalty factor)
+
     baseline_avg = 45.0  # Expected average task time
+
+    # Base procrastination from completion time
     if profile.avg_completion_time > baseline_avg:
         # Scale: 0-1 based on how much over baseline
         ratio = profile.avg_completion_time / baseline_avg
-        profile.procrastination_score = round(min(1.0, (ratio - 1.0) * 2), 2)
+        time_based_score = min(1.0, (ratio - 1.0) * 2)
     else:
-        profile.procrastination_score = 0.0
+        time_based_score = 0.0
+
+    # Overdue penalty: each overdue task increases procrastination score
+    # This ensures users with missed deadlines get higher procrastination scores
+    overdue_count = get_overdue_tasks_count(db)
+
+    if overdue_count > 0:
+        # Overdue penalty: add 0.15 per overdue task, capped at 0.6
+        overdue_penalty = min(0.6, overdue_count * 0.15)
+        # Combine time-based score and overdue penalty (weighted average)
+        # 70% time-based, 30% overdue penalty
+        profile.procrastination_score = round(
+            min(1.0, time_based_score * 0.7 + overdue_penalty * 0.3),
+            2
+        )
+    else:
+        profile.procrastination_score = round(time_based_score, 2)
 
     db.commit()
     db.refresh(profile)

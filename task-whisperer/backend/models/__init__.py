@@ -21,6 +21,7 @@ class Task(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed = Column(Boolean, nullable=False, default=False)
+    overdue = Column(Boolean, nullable=False, default=False, comment="True if deadline has passed and task is not completed")
 
 
 class TaskHistory(Base):

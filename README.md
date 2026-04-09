@@ -27,29 +27,67 @@ Busy professionals, students, freelancers, and anyone with multiple tasks who st
 
 - Create, update, delete tasks
 - Task fields:
-
   - Title
   - Description
   - Deadline
   - Estimated effort
-  - Optional importance
+  - Importance (1-10)
+  - Urgency flag
+  - Category override (manual Eisenhower quadrant assignment)
+
+#### Overdue Task Tracking
+
+- Automatic detection of tasks with past deadlines that aren't completed
+- Visual overdue badges with pulsing animation on task cards
+- Overdue stat card in dashboard (appears when overdue tasks exist)
+- Filter tasks by overdue status ("Overdue Only" filter)
+- Overdue penalty factored into procrastination score
+- API endpoints:
+  - `POST /tasks/overdue/detect` — scan and mark overdue tasks
+  - `GET /tasks/overdue/count` — get current overdue task count
 
 #### Intelligent Prioritization
 
 - AI-powered task ranking
 - Uses:
-
   - Deadline pressure
   - Effort estimation
   - Eisenhower Matrix (urgent vs important)
+  - User behavior adaptation
 
 #### Recommendation Engine
 
 - Suggests:
-
   - What to work on next
   - Ranked list of tasks
   - Human-readable explanations
+
+#### Advanced Filtering & Sorting
+
+- **Filters:**
+  - Active Only
+  - Overdue Only
+  - Completed Only
+  - All Tasks
+
+- **Sorting options:**
+  - **Date Created** — with toggle for Latest→Earliest / Earliest→Latest
+  - **Importance** — descending (highest first)
+  - **Deadline** — ascending (soonest first)
+  - **Effort** — with toggle for Min→Max / Max→Min
+  - **Eisenhower Quadrant** — Q1 → Q2 → Q3 → Q4, with importance descending within each quadrant
+
+#### Task Detail Modal
+
+- Click any task title or description to open a detailed view showing:
+  - Full description
+  - Importance score (visual card)
+  - Urgency status
+  - Eisenhower Quadrant (with color coding and auto/custom indicator)
+  - Estimated effort
+  - Deadline (relative + absolute)
+  - Status (Active / Overdue / Completed)
+  - Created and updated timestamps
 
 ---
 
@@ -58,7 +96,6 @@ Busy professionals, students, freelancers, and anyone with multiple tasks who st
 #### Behavior Tracking
 
 - Tracks:
-
   - Task completion
   - Actual time spent
   - Ignored recommendations
@@ -67,17 +104,19 @@ Busy professionals, students, freelancers, and anyone with multiple tasks who st
 #### Personalized Recommendations
 
 - Learns user patterns:
-
   - Preference for short vs long tasks
-  - Procrastination tendencies
+  - Procrastination tendencies (including overdue task penalty)
   - Deadline sensitivity
+  - Urgency bias
 
 #### Insights
 
 - Displays behavioral insights such as:
-
-  - “You tend to delay high-effort tasks”
-   “You complete short tasks faster”
+  - "You tend to delay high-effort tasks"
+  - "You complete short tasks faster"
+  - Procrastination score with overdue penalty visualization
+  - Average completion time
+  - Short task preference percentage
 
 ---
 
@@ -130,19 +169,27 @@ task-whisperer/
 │   │   ├── routes/
 │   │   ├── services/
 │   │   │   ├── recommendation.py
-│   │   │   ├── adaptive_learning.py
-│   │   │   ├── llm_service.py
+│   │   │   ├── overdue_service.py
+│   │   │   ├── user_profile_service.py
+│   │   │   └── llm_service.py
 │   │   ├── db/
 │   │   └── core/
+│   ├── migrate.py
 │   ├── requirements.txt
 │   └── Dockerfile
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   ├── pages/
-│   │   ├── api/
-│   │   └── App.js
+│   │   │   ├── Dashboard.js
+│   │   │   ├── TaskForm.js
+│   │   │   ├── TaskItem.js
+│   │   │   ├── TaskDetailModal.js
+│   │   │   ├── RecommendationPanel.js
+│   │   │   └── InsightsPanel.js
+│   │   ├── api.js
+│   │   ├── App.js
+│   │   └── App.css
 │   ├── package.json
 │   └── Dockerfile
 │
@@ -156,16 +203,20 @@ task-whisperer/
 
 ### Table: `tasks`
 
-| Column      | Type       |
-| ----------- | ---------- |
-| id          | UUID / INT |
-| title       | TEXT       |
-| description | TEXT       |
-| deadline    | TIMESTAMP  |
-| effort      | INT / ENUM |
-| importance  | INT        |
-| created_at  | TIMESTAMP  |
-| updated_at  | TIMESTAMP  |
+| Column            | Type       |
+|-------------------|------------|
+| id                | INT        |
+| title             | TEXT       |
+| description       | TEXT       |
+| deadline          | TIMESTAMP  |
+| effort            | INT        |
+| importance        | INT        |
+| is_urgent         | BOOLEAN    |
+| category_override | VARCHAR(50)|
+| created_at        | TIMESTAMP  |
+| updated_at        | TIMESTAMP  |
+| completed         | BOOLEAN    |
+| overdue           | BOOLEAN    |
 
 ---
 
@@ -203,10 +254,28 @@ task-whisperer/
 #### Task CRUD
 
 ```http
-GET /tasks
-POST /tasks
-PUT /tasks/{id}
+GET    /tasks
+POST   /tasks
+PUT    /tasks/{id}
 DELETE /tasks/{id}
+```
+
+---
+
+#### Overdue Task Detection
+
+```http
+POST /tasks/overdue/detect
+GET  /tasks/overdue/count
+```
+
+**Response:**
+
+```json
+{
+  "newly_marked": 3,
+  "total_overdue": 5
+}
 ```
 
 ---
@@ -325,9 +394,13 @@ Return STRICT JSON:
 
 #### Dashboard
 
-- Task list
+- Task list with advanced filtering (Active / Overdue / Completed / All)
 - Add/edit/delete tasks
 - Deadline + effort indicators
+- Overdue status badges with visual warnings
+- Bidirectional sort controls (Date Created, Effort)
+- Eisenhower quadrant sorting
+- Task detail modal on click
 
 #### Recommendation Panel
 
@@ -335,9 +408,13 @@ Return STRICT JSON:
 - Explanation
 - Ranked list
 
-#### Insights Panel (NEW)
+#### Insights Panel
 
 - Displays learned user behavior
+- Procrastination score with overdue penalty
+- Average completion time
+- Short task preference percentage
+- Urgency bias visualization
 
 ---
 
@@ -345,6 +422,8 @@ Return STRICT JSON:
 
 - TaskForm
 - TaskList
+- TaskItem (with overdue badges and click-to-view-details)
+- TaskDetailModal (full task details overlay)
 - RecommendationCard
 - InsightsPanel
 
@@ -610,19 +689,21 @@ task-whisperer/
 │   ├── db/
 │   │   └── __init__.py             # Database connection and session management
 │   ├── models/
-│   │   └── __init__.py             # SQLAlchemy ORM models
+│   │   └── __init__.py             # SQLAlchemy ORM models (includes overdue field)
 │   ├── schemas/
 │   │   └── __init__.py             # Pydantic request/response schemas
 │   ├── services/
 │   │   ├── __init__.py             # Service layer exports
 │   │   ├── llm_service.py          # Qwen LLM API integration
 │   │   ├── recommendation.py       # AI recommendation logic
-│   │   └── user_profile_service.py # User behavior analytics
+│   │   ├── overdue_service.py      # Overdue task detection and marking
+│   │   └── user_profile_service.py # User behavior analytics (with overdue penalty)
 │   ├── routes/
 │   │   ├── __init__.py             # Route exports
-│   │   ├── tasks.py                # Task CRUD endpoints
+│   │   ├── tasks.py                # Task CRUD + overdue endpoints
 │   │   ├── recommendations.py      # Recommendation endpoint
 │   │   └── profile.py              # User profile endpoints
+│   ├── migrate.py                  # Database migration script
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── .env.example
@@ -630,15 +711,16 @@ task-whisperer/
 │   ├── public/
 │   │   └── index.html
 │   ├── src/
-│   │   ├── api.js                  # API service layer
+│   │   ├── api.js                  # API service layer (includes overdue endpoints)
 │   │   ├── App.js                  # Main app component
-│   │   ├── App.css                 # Global styles
+│   │   ├── App.css                 # Global styles (includes overdue badge styles)
 │   │   ├── index.js                # React entry point
 │   │   ├── index.css               # Base CSS
 │   │   └── components/
-│   │       ├── Dashboard.js        # Task list and management
+│   │       ├── Dashboard.js        # Task list with filtering and sorting
 │   │       ├── TaskForm.js         # Add/edit task form
-│   │       ├── TaskItem.js         # Single task display
+│   │       ├── TaskItem.js         # Single task display with overdue badges
+│   │       ├── TaskDetailModal.js  # Task detail modal overlay
 │   │       ├── RecommendationPanel.js  # AI recommendations
 │   │       └── InsightsPanel.js    # User behavior analytics
 │   ├── Dockerfile
@@ -701,22 +783,25 @@ REACT_APP_API_URL=http://localhost:8000
 
 ## 🔁 User Flow
 
-1. User creates tasks
-2. System recommends priorities
-3. User completes tasks
-4. System stores behavior
-5. Profile updates
-6. Future recommendations improve
+1. User creates tasks with deadlines and effort estimates
+2. System automatically detects overdue tasks (past deadline, not completed)
+3. System recommends priorities based on AI + adaptive learning
+4. User completes tasks, tracking actual time spent
+5. Overdue detection runs on task completion to update procrastination scores
+6. User profile updates with learned behavior patterns
+7. Future recommendations improve based on user's work habits
 
 ---
 
 ## 🧪 Future Improvements
 
 - 📅 Smart scheduling (time-blocking)
-- 📊 Analytics dashboard
-- 🔔 Notifications & reminders
+- 📊 Advanced analytics dashboard with trend graphs
+- 🔔 Notifications & reminders for approaching deadlines
 - 📱 Mobile app version
-- 👥 Multi-user authentication
+- 👥 Multi-user authentication & shared task lists
+- 🎯 Goal tracking & progress milestones
+- 🤖 Enhanced LLM recommendations with context awareness
 
 ---
 
@@ -724,8 +809,11 @@ REACT_APP_API_URL=http://localhost:8000
 
 - Combines full-stack engineering + AI
 - Uses modern LLM integration (Qwen API)
-- Demonstrates adaptive intelligence
+- Demonstrates adaptive intelligence with behavior learning
 - Production-ready architecture with Docker
+- Advanced overdue task detection and tracking system
+- Intelligent filtering and sorting with bidirectional sort controls
+- Rich task detail modal for comprehensive task overview
 
 ---
 
