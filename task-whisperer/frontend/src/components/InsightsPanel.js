@@ -229,7 +229,7 @@ function InsightsPanel() {
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '0.85rem', color: '#64748B' }}>Profile Last Updated</div>
+            <div style={{ fontSize: '0.85rem', color: '#64748B' }}>Statistics Last Updated</div>
             <div style={{ fontSize: '0.95rem', color: '#1e293b' }}>
               {profile.updated_at ? new Date(profile.updated_at).toLocaleString() : 'Never'}
             </div>

@@ -42,6 +42,13 @@ export const completeTask = async (taskId, actualDurationMinutes) => {
   return response.data;
 };
 
+export const updateTaskCategory = async (taskId, categoryOverride) => {
+  const response = await api.patch(`/tasks/${taskId}/category`, {
+    category_override: categoryOverride,
+  });
+  return response.data;
+};
+
 // ─── Recommendation APIs ────────────────────────────────────────
 
 export const getRecommendation = async () => {

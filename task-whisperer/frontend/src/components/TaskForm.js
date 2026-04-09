@@ -16,9 +16,22 @@ function TaskForm({ task = null, onSubmit, onCancel }) {
     effort: task?.effort || '',
     importance: task?.importance || 5,
     is_urgent: task?.is_urgent || false,
+    category_override: task?.category_override || '',
   });
 
   const [error, setError] = useState('');
+
+  // Compute predicted category based on current form values
+  const getPredictedCategory = () => {
+    const urgent = formData.is_urgent;
+    const importance = parseInt(formData.importance, 10) || 5;
+    if (urgent && importance >= 7) return { key: 'Q1', label: 'Do First' };
+    if (!urgent && importance >= 7) return { key: 'Q2', label: 'Schedule' };
+    if (urgent && importance < 7) return { key: 'Q3', label: 'Delegate' };
+    return { key: 'Q4', label: 'Eliminate' };
+  };
+
+  const predictedCategory = getPredictedCategory();
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -37,6 +50,16 @@ function TaskForm({ task = null, onSubmit, onCancel }) {
       return;
     }
 
+    // Validate deadline is not in the past
+    if (formData.deadline) {
+      const selectedDeadline = new Date(formData.deadline);
+      const now = new Date();
+      if (selectedDeadline <= now) {
+        setError('Deadline cannot be in the past. Please choose a future date and time.');
+        return;
+      }
+    }
+
     try {
       const taskData = {
         title: formData.title.trim(),
@@ -45,6 +68,7 @@ function TaskForm({ task = null, onSubmit, onCancel }) {
         effort: formData.effort ? parseInt(formData.effort, 10) : null,
         importance: parseInt(formData.importance, 10),
         is_urgent: formData.is_urgent,
+        category_override: formData.category_override || null,
       };
 
       if (isEditing) {
@@ -163,6 +187,34 @@ function TaskForm({ task = null, onSubmit, onCancel }) {
           />
           <span>Mark as urgent</span>
         </label>
+      </div>
+
+      {/* Category approval section */}
+      <div className="form-group" style={{ padding: '0.75rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+        <label className="form-label" style={{ marginBottom: '0.5rem' }}>
+          📐 Task Category
+          <span style={{ fontWeight: 400, fontSize: '0.85rem', color: '#64748B', marginLeft: '0.5rem' }}>
+            (Predicted: {predictedCategory.key} - {predictedCategory.label})
+          </span>
+        </label>
+        <select
+          name="category_override"
+          className="form-input"
+          value={formData.category_override}
+          onChange={handleChange}
+          style={{ width: '100%' }}
+        >
+          <option value="">Auto (use predicted category)</option>
+          <option value="Q1-Do First">Q1 - Do First 🔥</option>
+          <option value="Q2-Schedule">Q2 - Schedule 📅</option>
+          <option value="Q3-Delegate">Q3 - Delegate 📋</option>
+          <option value="Q4-Eliminate">Q4 - Eliminate 🗑️</option>
+        </select>
+        <p style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.35rem', marginBottom: 0 }}>
+          {formData.category_override
+            ? `Using your selection: ${formData.category_override}`
+            : 'Will be auto-classified based on urgency and importance, or select a category above to override.'}
+        </p>
       </div>
 
       <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>

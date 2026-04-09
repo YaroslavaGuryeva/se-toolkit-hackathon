@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { completeTask, deleteTask } from '../api';
+import { completeTask, deleteTask, updateTaskCategory } from '../api';
 
 /**
  * TaskItem component for displaying and managing a single task.
  */
-function TaskItem({ task, onRefresh }) {
+function TaskItem({ task }) {
   const [showComplete, setShowComplete] = useState(false);
   const [duration, setDuration] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showCategoryEditor, setShowCategoryEditor] = useState(false);
 
-  // Determine Eisenhower quadrant
+  // Determine Eisenhower quadrant (respects category_override)
   const getQuadrant = () => {
+    if (task.category_override) {
+      const parts = task.category_override.split('-');
+      return { key: parts[0], label: parts.slice(1).join('-'), class: `quadrant-${parts[0].toLowerCase()}` };
+    }
     if (task.is_urgent && task.importance >= 7) return { key: 'Q1', label: 'Do First', class: 'quadrant-q1' };
     if (!task.is_urgent && task.importance >= 7) return { key: 'Q2', label: 'Schedule', class: 'quadrant-q2' };
     if (task.is_urgent && task.importance < 7) return { key: 'Q3', label: 'Delegate', class: 'quadrant-q3' };
@@ -40,9 +45,11 @@ function TaskItem({ task, onRefresh }) {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
     try {
       await deleteTask(task.id);
-      if (onRefresh) onRefresh();
+      window.location.reload();
     } catch (err) {
-      setError('Failed to delete task');
+      const errorMsg = err.response?.data?.detail || err.message || 'Failed to delete task';
+      setError(errorMsg);
+      console.error('Delete task error:', err);
     }
   };
 
@@ -56,21 +63,59 @@ function TaskItem({ task, onRefresh }) {
       setSuccess('Task marked as complete!');
       setShowComplete(false);
       setDuration('');
-      if (onRefresh) setTimeout(() => onRefresh(), 500);
+      window.location.reload();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to complete task');
+    }
+  };
+
+  const handleCategoryChange = async (e) => {
+    const newCategory = e.target.value || null;
+    try {
+      await updateTaskCategory(task.id, newCategory);
+      setSuccess('Category updated!');
+      setShowCategoryEditor(false);
+      setTimeout(() => window.location.reload(), 300);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update category');
     }
   };
 
   if (task.completed) {
     return (
       <div className="card" style={{ opacity: 0.7 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h4 style={{ textDecoration: 'line-through', color: '#64748B' }}>{task.title}</h4>
-            <span className="badge badge-completed">Completed</span>
+        {error && <div className="error">{error}</div>}
+        {success && <div className="success">{success}</div>}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ textDecoration: 'line-through', color: '#64748B', marginBottom: '0.5rem' }}>{task.title}</h4>
+            {task.description && (
+              <p style={{ color: '#94A3B8', fontSize: '0.85rem', marginBottom: '0.5rem', textDecoration: 'line-through' }}>
+                {task.description}
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+              <span className="badge badge-completed">✅ Completed</span>
+              <span className={`badge ${task.is_urgent ? 'badge-urgent' : 'badge-normal'}`}>
+                {task.is_urgent ? '🔥 Urgent' : 'Normal'}
+              </span>
+              <span className="badge badge-important">
+                ⭐ Importance: {task.importance}/10
+              </span>
+              <span className="badge badge-normal">
+                📐 {quadrant.key}: {quadrant.label}
+              </span>
+              {task.effort && (
+                <span className="badge badge-normal">
+                  ⏱️ ~{task.effort} min
+                </span>
+              )}
+              <span className="badge badge-normal">
+                📅 {formatDeadline(task.deadline)}
+              </span>
+            </div>
           </div>
-          <button className="btn btn-danger btn-small" onClick={handleDelete}>
+          <button className="btn btn-danger btn-small" onClick={handleDelete} style={{ marginLeft: '0.5rem' }}>
             🗑️ Delete
           </button>
         </div>
@@ -98,8 +143,8 @@ function TaskItem({ task, onRefresh }) {
             <span className="badge badge-important">
               ⭐ Importance: {task.importance}/10
             </span>
-            <span className="badge badge-normal">
-              📐 {quadrant.key}: {quadrant.label}
+            <span className="badge badge-normal" style={{ cursor: 'pointer' }} onClick={() => setShowCategoryEditor(!showCategoryEditor)} title="Click to change category">
+              📐 {quadrant.key}: {quadrant.label} {task.category_override ? '(custom)' : '(auto)'} ✏️
             </span>
             {task.effort && (
               <span className="badge badge-normal">
@@ -113,6 +158,35 @@ function TaskItem({ task, onRefresh }) {
         </div>
       </div>
 
+      {/* Category editor */}
+      {showCategoryEditor && (
+        <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+          <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem', display: 'block' }}>
+            Change Category:
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <select
+              className="form-input"
+              value={task.category_override || ''}
+              onChange={handleCategoryChange}
+              style={{ flex: 1 }}
+            >
+              <option value="">Auto (use predicted category)</option>
+              <option value="Q1-Do First">Q1 - Do First 🔥</option>
+              <option value="Q2-Schedule">Q2 - Schedule 📅</option>
+              <option value="Q3-Delegate">Q3 - Delegate 📋</option>
+              <option value="Q4-Eliminate">Q4 - Eliminate 🗑️</option>
+            </select>
+            <button
+              className="btn btn-secondary btn-small"
+              onClick={() => setShowCategoryEditor(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
         <button
           className="btn btn-success btn-small"
@@ -120,11 +194,6 @@ function TaskItem({ task, onRefresh }) {
         >
           ✅ Complete
         </button>
-        {onRefresh && (
-          <button className="btn btn-secondary btn-small" onClick={onRefresh}>
-            🔄 Refresh
-          </button>
-        )}
         <button className="btn btn-danger btn-small" onClick={handleDelete}>
           🗑️ Delete
         </button>

@@ -132,7 +132,7 @@ function Dashboard() {
       ) : (
         <div>
           {sortedTasks.map((task) => (
-            <TaskItem key={task.id} task={task} onRefresh={fetchTasks} />
+            <TaskItem key={task.id} task={task} />
           ))}
         </div>
       )}
