@@ -23,6 +23,13 @@ EISENHOWER_QUADRANTS = {
 }
 
 
+def _get_eisenhower_quadrant(task: Task) -> str:
+    """Get the effective quadrant for a task, respecting user category overrides."""
+    if task.category_override:
+        return task.category_override
+    return _classify_eisenhower(task)
+
+
 def _classify_eisenhower(task: Task) -> str:
     """Classify a task into an Eisenhower Matrix quadrant."""
     if task.is_urgent and task.importance >= 7:
@@ -78,7 +85,7 @@ def _build_recommendation_prompt(
     # Build task descriptions for the prompt
     task_details = []
     for task in tasks:
-        quadrant = _classify_eisenhower(task)
+        quadrant = _get_eisenhower_quadrant(task)
         deadline_urgency = _compute_deadline_urgency(task)
         effort_str = f"{task.effort} min" if task.effort else "Unknown"
         deadline_str = task.deadline.isoformat() if task.deadline else "No deadline"
@@ -114,6 +121,8 @@ ACTIVE TASKS:
 INSTRUCTIONS:
 Rank ALL tasks from most to least recommended to work on NEXT. Consider:
 1. Eisenhower Matrix: Q1 (Do First) > Q2 (Schedule) > Q3 (Delegate) > Q4 (Eliminate)
+   - IMPORTANT: Q4 (Eliminate) tasks MUST ALWAYS rank below Q3 (Delegate) tasks, regardless of other factors.
+   - Q4 tasks should receive a significant score penalty to ensure they always appear last.
 2. Deadline urgency: Tasks closer to deadline should rank higher
 3. Importance: Higher importance tasks should rank higher
 4. User's tendency to prefer short tasks (if high, give slight boost to low-effort tasks)
@@ -152,6 +161,14 @@ def _fallback_ranking(tasks: List[Task], profile: UserProfile) -> List[Dict[str,
     Generate a deterministic fallback ranking without LLM.
     Used when Qwen API is unavailable.
     """
+    # Quadrant priority mapping: lower number = higher priority
+    QUADRANT_PRIORITY = {
+        "Q1-Do First": 0,
+        "Q2-Schedule": 1,
+        "Q3-Delegate": 2,
+        "Q4-Eliminate": 3,
+    }
+
     ranked = []
     for task in tasks:
         deadline_score = _compute_deadline_urgency(task)
@@ -176,20 +193,33 @@ def _fallback_ranking(tasks: List[Task], profile: UserProfile) -> List[Dict[str,
             raw_score += 0.1 * importance_score
 
         score = min(100, max(0, raw_score * 100))
-        quadrant = _classify_eisenhower(task)
+        quadrant = _get_eisenhower_quadrant(task)
+
+        # Enforce: Q4 (Eliminate) tasks ALWAYS rank below Q3 (Delegate)
+        # Apply a large penalty to Q4 tasks so they can never outrank Q3
+        quadrant_order = QUADRANT_PRIORITY.get(quadrant, 3)
+        if quadrant_order == QUADRANT_PRIORITY["Q4-Eliminate"]:
+            # Cap Q4 scores at a maximum lower than any Q3 score
+            score = min(score, 10.0)
 
         ranked.append({
             "task_id": task.id,
             "title": task.title,
             "score": round(score, 2),
             "eisenhower_quadrant": quadrant,
+            "_quadrant_order": quadrant_order,  # used for sorting, removed later
         })
 
-    # Sort by score descending, then by importance, then by deadline urgency
-    ranked.sort(key=lambda x: (-x["score"], -next(t.importance for t in tasks if t.id == x["task_id"])))
+    # Sort by quadrant order first, then by score descending, then by importance
+    ranked.sort(key=lambda x: (
+        x["_quadrant_order"],
+        -x["score"],
+        -next((t.importance for t in tasks if t.id == x["task_id"]), 0),
+    ))
 
     for i, item in enumerate(ranked):
         item["rank"] = i + 1
+        del item["_quadrant_order"]  # remove internal field
 
     return ranked
 
@@ -197,13 +227,13 @@ def _fallback_ranking(tasks: List[Task], profile: UserProfile) -> List[Dict[str,
 def get_recommendation(db: Session, use_llm: bool = True) -> RecommendationResponse:
     """
     Get task recommendations using Qwen LLM + Eisenhower Matrix + user profile.
-    
+
     Falls back to deterministic ranking if LLM is unavailable.
-    
+
     Args:
         db: Database session.
         use_llm: Whether to attempt LLM-based recommendation.
-    
+
     Returns:
         RecommendationResponse with ranked tasks.
     """
@@ -216,6 +246,9 @@ def get_recommendation(db: Session, use_llm: bool = True) -> RecommendationRespo
             ranking=[],
             explanation="No active tasks. Add some tasks and I'll help you prioritize them!",
         )
+
+    # Build a lookup for task objects
+    task_lookup = {task.id: task for task in active_tasks}
 
     # Get user profile
     profile = get_or_create_profile(db)
@@ -246,6 +279,10 @@ def get_recommendation(db: Session, use_llm: bool = True) -> RecommendationRespo
                     eisenhower_quadrant=str(item["eisenhower_quadrant"]),
                 )
                 ranking.append(ranked_task)
+
+            # ENFORCE: Q4 (Eliminate) tasks MUST ALWAYS rank below Q3 (Delegate) tasks.
+            # Post-process the LLM ranking to guarantee this invariant.
+            ranking = _enforce_quadrant_order(ranking, task_lookup)
 
             recommended = ranking[0] if ranking else None
             explanation = parsed.get("explanation", "Based on urgency, importance, and your work patterns.")
@@ -284,3 +321,55 @@ def get_recommendation(db: Session, use_llm: bool = True) -> RecommendationRespo
         ranking=ranking,
         explanation=explanation,
     )
+
+
+def _enforce_quadrant_order(ranking: List[RankedTask], task_lookup: Dict[int, Task]) -> List[RankedTask]:
+    """
+    Ensure Q4 (Eliminate) tasks always rank below Q3 (Delegate) tasks.
+    Also enforces Q1 > Q2 > Q3 > Q4 ordering as a hard constraint.
+
+    Strategy:
+    1. Separate tasks by quadrant
+    2. Within each quadrant, keep the LLM's relative ordering
+    3. Concatenate: Q1 tasks, Q2 tasks, Q3 tasks, Q4 tasks
+    4. Re-assign ranks and adjust scores to maintain ordering
+    """
+    QUADRANT_KEY = {"Q1-Do First": 0, "Q2-Schedule": 1, "Q3-Delegate": 2, "Q4-Eliminate": 3}
+
+    quadrants: Dict[int, List[RankedTask]] = {0: [], 1: [], 2: [], 3: []}
+
+    for item in ranking:
+        q_key = item.eisenhower_quadrant
+        q_order = QUADRANT_KEY.get(q_key, 3)
+        quadrants[q_order].append(item)
+
+    # Find the minimum score in Q3 (if any) to set Q4 scores below it
+    q3_scores = [item.score for item in quadrants[2]]
+    q4_scores = [item.score for item in quadrants[3]]
+
+    if q3_scores and q4_scores:
+        q3_min = min(q3_scores)
+        # Scale Q4 scores to be below the minimum Q3 score
+        if q4_scores:
+            q4_max = max(q4_scores)
+            if q4_max >= q3_min and q4_max > 0:
+                scale_factor = (q3_min * 0.9) / q4_max  # 90% of min Q3 score
+                for item in quadrants[3]:
+                    item.score = round(item.score * scale_factor, 2)
+    elif q4_scores and not q3_scores:
+        # No Q3 tasks, but Q4 tasks exist - cap them low
+        for item in quadrants[3]:
+            item.score = min(item.score, 10.0)
+
+    # Reassemble in quadrant order: Q1 > Q2 > Q3 > Q4
+    result = []
+    for q_order in [0, 1, 2, 3]:
+        # Within each quadrant, maintain the LLM's relative order (by original rank)
+        quadrant_tasks = sorted(quadrants[q_order], key=lambda x: x.rank)
+        result.extend(quadrant_tasks)
+
+    # Re-assign ranks
+    for i, item in enumerate(result):
+        item.rank = i + 1
+
+    return result

@@ -17,9 +17,11 @@ class Task(Base):
     effort = Column(Integer, nullable=True, comment="Estimated effort in minutes")
     importance = Column(Integer, nullable=False, default=5, comment="Importance rating 1-10")
     is_urgent = Column(Boolean, nullable=False, default=False, comment="Whether the task is urgent")
+    category_override = Column(String(50), nullable=True, comment="User-approved category override (Q1-Do First, Q2-Schedule, Q3-Delegate, Q4-Eliminate)")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed = Column(Boolean, nullable=False, default=False)
+    overdue = Column(Boolean, nullable=False, default=False, comment="True if deadline has passed and task is not completed")
 
 
 class TaskHistory(Base):
@@ -27,7 +29,7 @@ class TaskHistory(Base):
     __tablename__ = "task_history"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
     actual_duration_minutes = Column(Float, nullable=True)
     was_recommended = Column(Boolean, nullable=False, default=False)

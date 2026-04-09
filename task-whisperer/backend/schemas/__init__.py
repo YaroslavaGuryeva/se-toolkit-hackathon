@@ -1,9 +1,9 @@
 """
 Pydantic schemas for request/response validation.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # ─── Task Schemas ───────────────────────────────────────────────
@@ -16,6 +16,17 @@ class TaskCreate(BaseModel):
     effort: Optional[int] = Field(None, ge=1, description="Estimated effort in minutes")
     importance: int = Field(default=5, ge=1, le=10, description="Importance rating 1-10")
     is_urgent: bool = False
+    category_override: Optional[str] = Field(None, description="Optional category override: Q1-Do First, Q2-Schedule, Q3-Delegate, Q4-Eliminate")
+
+    @field_validator('deadline')
+    @classmethod
+    def deadline_must_not_be_in_past(cls, v):
+        if v is not None:
+            now = datetime.now(timezone.utc)
+            deadline = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+            if deadline <= now:
+                raise ValueError('Deadline cannot be in the past')
+        return v
 
 
 class TaskUpdate(BaseModel):
@@ -27,6 +38,17 @@ class TaskUpdate(BaseModel):
     importance: Optional[int] = Field(None, ge=1, le=10)
     is_urgent: Optional[bool] = None
     completed: Optional[bool] = None
+    category_override: Optional[str] = Field(None, description="Optional category override: Q1-Do First, Q2-Schedule, Q3-Delegate, Q4-Eliminate")
+
+    @field_validator('deadline')
+    @classmethod
+    def deadline_must_not_be_in_past(cls, v):
+        if v is not None:
+            now = datetime.now(timezone.utc)
+            deadline = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+            if deadline <= now:
+                raise ValueError('Deadline cannot be in the past')
+        return v
 
 
 class TaskResponse(BaseModel):
@@ -39,6 +61,8 @@ class TaskResponse(BaseModel):
     importance: int
     is_urgent: bool
     completed: bool
+    overdue: bool
+    category_override: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -112,3 +136,11 @@ class UserProfileUpdate(BaseModel):
     avg_completion_time: Optional[float] = Field(None, gt=0)
     procrastination_score: Optional[float] = Field(None, ge=0, le=1)
     urgency_bias: Optional[float] = Field(None, ge=0, le=1)
+
+
+# ─── Overdue Detection Schemas ──────────────────────────────────
+
+class OverdueDetectionResponse(BaseModel):
+    """Schema returned by overdue task detection endpoint."""
+    newly_marked: int = Field(..., description="Number of tasks newly marked as overdue")
+    total_overdue: int = Field(..., description="Total number of overdue tasks")
